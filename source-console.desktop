@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Source Console
+Comment=Terminal emulator skinned like the Source Engine developer console
+Exec=srcterm
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;Utility;
+Keywords=terminal;console;source;vte;

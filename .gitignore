@@ -1,0 +1,14 @@
+# build output
+/srcterm
+src/*.o
+
+# editor / OS cruft
+*.swp
+*~
+.DS_Store
+
+# debug screenshots
+*.png
+
+# generated zsh completion cache
+runtime/.zcompdump*

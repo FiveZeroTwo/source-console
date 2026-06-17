@@ -1,0 +1,90 @@
+// App = the entire runtime state of srcterm: the X11 connection and back buffer,
+// the libvterm engine + pty, the scrollback grid, and the command-box/completion
+// state. Almost every function in the app takes an `App *` and mutates it.
+#pragma once
+#include <X11/Xft/Xft.h>
+#include <X11/Xlib.h>
+#include <vterm.h>
+
+#include <sys/types.h>
+
+#include <cstdint>
+#include <deque>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "theme.h"
+
+struct Cell {  // a stored scrollback cell
+  uint32_t cp;
+  uint8_t fr, fg, fb, br, bg, bb, bold;
+};
+struct Rect {
+  int x, y, w, h;
+  bool hit(int px, int py) const {
+    return px >= x && px < x + w && py >= y && py < y + h;
+  }
+};
+
+// Base (unscaled) chrome dimensions; runtime values live in App and are derived
+// from these via App::S() at the current uiscale.
+inline constexpr int TITLE_H = 26, INPUT_H = 32, PAD = 4, SBW = 14, BTN = 26;
+inline constexpr int MAXCOMP = 14;  // max completion rows shown in the popup
+
+struct App {
+  Theme th;
+  // X
+  Display *dpy = nullptr;
+  int scr = 0;
+  Window win = 0, root = 0;
+  Visual *vis = nullptr;
+  Colormap cmap = 0;
+  Pixmap buf = 0;
+  GC gc = 0;
+  XftDraw *xd = nullptr;
+  XftFont *font = nullptr, *fontb = nullptr;  // terminal grid (zoomable)
+  XftFont *uifont = nullptr, *uifontb = nullptr;  // chrome (fixed size)
+  std::string fontfam = "monospace";
+  int fontsize = 11;              // current point size (for zoom)
+  int fontsize_base = 11;        // configured size (Ctrl+0 reset target)
+  int cw = 8, ch = 16, asc = 12;  // cell metrics
+  int uiasc = 12, uich = 16;      // chrome font ascent / line height
+  bool passthrough = true;        // true: keys -> running app (modern terminal)
+  double uiscale = 1.0;           // chrome scale (Ctrl+Shift +/-/0)
+  int title_h = TITLE_H, input_h = INPUT_H, pad = PAD, sbw = SBW, btn = BTN;
+  int S(int v) const { return (int)(v * uiscale + 0.5); }  // scale a dimension
+  int W = 1100, H = 700;
+  std::map<unsigned, XftColor> ccache;
+  // vterm
+  VTerm *vt = nullptr;
+  VTermScreen *vts = nullptr;
+  int master = -1;
+  pid_t child = -1;
+  int rows = 24, cols = 80;
+  int currow = 0, curcol = 0;
+  std::deque<std::vector<Cell>> sb;  // scrollback
+  int scroll = 0;                    // lines scrolled up from bottom
+  // input + completion
+  std::string input;
+  size_t caret = 0;
+  std::vector<std::string> history;
+  int hist = 0;
+  std::vector<std::string> commands;   // execset ∪ aliases, sorted (completion)
+  std::set<std::string> execset;       // PATH executables, scanned once
+  std::vector<std::string> aliases;    // shell aliases, refreshed by rescan
+  bool is_zsh = true;                  // live alias dump uses zsh syntax
+  bool alias_want = false;             // a rescan was requested
+  bool alias_pending = false;          // dump command sent; awaiting its file
+  std::string alias_tmp;               // temp file the running shell dumps to
+  std::vector<std::string> matches;    // text inserted when accepted
+  std::vector<std::string> matchdisp;  // short label shown in the popup
+  int sel = -1;
+  bool popup = false;
+  bool match_is_path = false;  // matches are filesystem paths (vs command names)
+  std::string cwd;             // shell's current dir (from /proc/<shell>/cwd)
+  // hit rects
+  Rect r_title, r_min, r_close, r_submit, r_grip, r_out;
+  bool running = true, dirty = true;
+};
