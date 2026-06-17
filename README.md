@@ -21,8 +21,10 @@ A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
   - **Passthrough / direct** (default): every keystroke goes to the running
     program, encoded via libvterm's keyboard layer (application cursor-key /
     keypad modes + modifiers) — so vim, htop, less, REPLs, ssh all work like any
-    modern terminal. A block cursor marks the shell/app cursor. Click the
-    terminal area to enter this mode.
+    modern terminal. **Mouse reporting** is forwarded too, so clicks/scroll/drag
+    work in tmux, vim, htop, less (hold **Shift** to select locally instead), and
+    **bracketed paste** is honored. A block cursor marks the shell/app cursor.
+    Click the terminal area to enter this mode.
   - **Command box**: type in the bottom field and press Enter / Submit to run a
     line; `Up`/`Down` recall history; a smart autocomplete dropdown appears
     (`Tab` extends to the common prefix, then accepts). Click the input bar to
@@ -31,9 +33,14 @@ A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
   with a fuzzy (subsequence) fallback when nothing matches by prefix, and
   shell-style longest-common-prefix expansion on `Tab`.
 - **Clipboard / X selections**: drag over the output pane to select (we own
-  `PRIMARY`); middle-click pastes `PRIMARY`, `Ctrl+Shift+V` pastes `CLIPBOARD`,
-  `Ctrl+Shift+C` copies the selection to `CLIPBOARD`. Paste lands in the command
-  box, or in the running program when it owns the terminal.
+  `PRIMARY`); double-click selects a word, triple-click a line, Shift-click
+  extends, and dragging past the top/bottom edge auto-scrolls. Middle-click
+  pastes `PRIMARY`, `Ctrl+Shift+V` pastes `CLIPBOARD`, `Ctrl+Shift+C` copies the
+  selection. Paste lands in the command box, or in the running program (wrapped
+  as a bracketed paste) when it owns the terminal. **Ctrl+click a URL** to open
+  it (`xdg-open`).
+- **Reflow on resize**: scrollback rewraps to the new width as you resize the
+  window (libvterm reclaims lines via `sb_popline`).
 - **Color-coded output**, Source-style: lines that look like warnings are tinted
   yellow and errors red — but only their default-colored text, so a program's
   own colors are never overridden (toggle with `color_lines`).
@@ -66,9 +73,13 @@ Runs natively on X11, and on Wayland via XWayland (no flags needed).
 | Up / Down *(box)* | navigate the dropdown, or recall history when closed |
 | Esc *(box)* | close the dropdown |
 | Ctrl+R *(box)* | rescan the command/alias completion list |
-| Drag over output | select text (copies to `PRIMARY`) |
+| Drag over output | select text (copies to `PRIMARY`); drag past an edge auto-scrolls |
+| Double / triple-click | select word / whole line |
+| Shift-click | extend the current selection |
 | Middle-click | paste the `PRIMARY` selection |
 | Ctrl+Shift+C / Ctrl+Shift+V | copy selection / paste from `CLIPBOARD` |
+| Ctrl+click a URL | open it with `xdg-open` |
+| Mouse (when an app enables it) | clicks/scroll/drag go to the program (Shift = select locally) |
 | Mouse wheel (over output) | scroll the scrollback |
 | Ctrl + `+` / `-` / `0` | scale the **whole app** (font + chrome) up / down / reset |
 | Ctrl+Shift + `+` / `-` / `0` | scale only the UI chrome (fine-tune) |
@@ -124,6 +135,6 @@ The app is split into small modules under `src/`, all sharing the central
 ## Possible next steps
 
 - Tie the palette to the active `rice` theme.
-- Rectangular (block) selection; double/triple-click word/line select.
-- Bracketed-paste mode for the passthrough terminal.
+- Rectangular (block) selection; word-by-word drag after a double-click.
+- URL hover highlight (underline links under the pointer).
 - Smarter completion still: per-directory history, fuzzy paths.

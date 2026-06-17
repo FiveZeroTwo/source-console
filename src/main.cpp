@@ -115,6 +115,7 @@ int main() {
   vterm_screen_set_callbacks(a.vts, &SCB, &a);
   vterm_screen_reset(a.vts, 1);
   VTermState *st = vterm_obtain_state(a.vt);
+  a.vst = st;
   int r, g, b;
   VTermColor fg, bgc;
   parse_hex(a.th.fg, r, g, b);
@@ -166,6 +167,7 @@ int main() {
       a.alias_want = false;
     }
     if (a.alias_pending) try_load_alias_dump(&a);
+    selection_autoscroll_tick(&a);  // continuous edge-scroll during a drag
     if (a.dirty) {
       render(&a);
       a.dirty = false;
@@ -252,15 +254,22 @@ int main() {
         seeded = true;
         // Clipboard round-trip: select the banner row (owns PRIMARY), then paste
         // PRIMARY into the box — exercises serve + receive end to end.
-        if (getenv("SRCTERM_CLIPTEST")) {
+        if (const char *ct = getenv("SRCTERM_CLIPTEST")) {
           Rect o = a.r_out;
           int y = o.y + 1 + a.ch / 2;
-          int ex = o.x + 3 + 13 * a.cw + a.cw / 2;  // through col 13 = "Source Console"
-          sel_begin(&a, o.x + 3 + a.cw / 2, y);
-          sel_update(&a, ex, y);
-          sel_end(&a, ex, y);
-          a.passthrough = false;     // box mode → paste lands in the field
-          paste_request(&a, false);  // PRIMARY (we own it) → round-trip → a.input
+          std::string mode = ct;
+          if (mode == "word") {  // double-click on "Console" (banner cols 7..13)
+            sel_word(&a, o.x + 3 + 9 * a.cw, y);
+          } else if (mode == "line") {  // triple-click selects the whole line
+            sel_line(&a, o.x + 3 + 2 * a.cw, y);
+          } else {  // default: drag-select "Source Console" + paste round-trip
+            int ex = o.x + 3 + 13 * a.cw + a.cw / 2;  // through col 13
+            sel_begin(&a, o.x + 3 + a.cw / 2, y);
+            sel_update(&a, ex, y);
+            sel_end(&a, ex, y);
+            a.passthrough = false;     // box mode → paste lands in the field
+            paste_request(&a, false);  // PRIMARY (we own it) → round-trip → a.input
+          }
           a.dirty = true;
           continue;
         }

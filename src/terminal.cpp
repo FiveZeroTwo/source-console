@@ -39,6 +39,36 @@ static int cb_pushline(int cols, const VTermScreenCell *cells, void *u) {
   a->have_sel = false;  // selection coords are now stale; copied text is kept
   return 1;
 }
+// libvterm reclaims scrollback into the screen when it grows / rewraps on
+// resize: hand back our most recent line (reconstructed into VTermScreenCells).
+static int cb_popline(int cols, VTermScreenCell *cells, void *u) {
+  App *a = (App *)u;
+  if (a->sb.empty()) return 0;
+  const std::vector<Cell> &ln = a->sb.back();
+  for (int c = 0; c < cols; c++) {
+    VTermScreenCell sc;
+    memset(&sc, 0, sizeof sc);
+    sc.width = 1;
+    const Cell *cell = c < (int)ln.size() ? &ln[c] : nullptr;
+    sc.chars[0] = (cell && cell->cp) ? cell->cp : ' ';
+    if (cell) {
+      vterm_color_rgb(&sc.fg, cell->fr, cell->fg, cell->fb);
+      vterm_color_rgb(&sc.bg, cell->br, cell->bg, cell->bb);
+      sc.attrs.bold = cell->bold;
+    }
+    cells[c] = sc;
+  }
+  a->sb.pop_back();
+  a->dirty = true;
+  return 1;
+}
+// Track terminal properties we care about: which mouse-reporting mode the
+// foreground app has enabled (so input.cpp knows whether to forward the mouse).
+static int cb_settermprop(VTermProp prop, VTermValue *val, void *u) {
+  App *a = (App *)u;
+  if (prop == VTERM_PROP_MOUSE) a->mouse_mode = val->number;
+  return 1;
+}
 // `clear`'s \e[3J asks to drop the scrollback; flush our own buffer so the
 // content is actually gone, not just scrolled out of view.
 static int cb_sbclear(void *u) {
@@ -48,16 +78,36 @@ static int cb_sbclear(void *u) {
   a->dirty = true;
   return 1;
 }
-const VTermScreenCallbacks SCB = {cb_damage,     nullptr,    cb_movecursor,
-                                  nullptr,       nullptr,    nullptr,
-                                  cb_pushline,   nullptr,    cb_sbclear};
+const VTermScreenCallbacks SCB = {cb_damage,     nullptr,      cb_movecursor,
+                                  cb_settermprop, nullptr,     nullptr,
+                                  cb_pushline,   cb_popline,   cb_sbclear};
 void out_cb(const char *s, size_t len, void *u) {
   App *a = (App *)u;
   if (a->master >= 0) (void)!write(a->master, s, len);
 }
 
+// Watch the child's output for bracketed-paste mode toggles (DECSET 2004
+// h/l). A short tail is carried between calls so a sequence split across two
+// reads is still caught.
+static void scan_bracket(App *a, const char *s, size_t n) {
+  std::string buf = a->vt_tail;
+  buf.append(s, n);
+  const std::string key = "\x1b[?2004";  // ESC [ ? 2 0 0 4, then 'h' or 'l'
+  size_t pos = 0;
+  while ((pos = buf.find(key, pos)) != std::string::npos) {
+    size_t e = pos + key.size();
+    if (e >= buf.size()) break;  // letter not arrived yet — leave in the tail
+    if (buf[e] == 'h') a->bracket_paste = true;
+    else if (buf[e] == 'l') a->bracket_paste = false;
+    pos = e + 1;
+  }
+  size_t keep = std::min<size_t>(buf.size(), key.size() + 1);
+  a->vt_tail = buf.substr(buf.size() - keep);
+}
+
 // ---- pty feed (input to terminal = output from child) ----
 void feed(App *a, const char *s, size_t n) {
+  scan_bracket(a, s, n);
   vterm_input_write(a->vt, s, n);
   vterm_screen_flush_damage(a->vts);
 }

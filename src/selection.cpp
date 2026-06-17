@@ -108,6 +108,16 @@ void sel_update(App *a, int x, int y) {
   if (a->sel_l1 != a->sel_l0 || a->sel_c1 != a->sel_c0) a->have_sel = true;
   a->dirty = true;
 }
+// Extract the current range, and (if non-empty) own PRIMARY so middle-click
+// paste works here and in other apps. Returns whether a selection now exists.
+static bool sel_own(App *a) {
+  a->seltext = sel_extract(a);
+  a->have_sel = !a->seltext.empty();
+  a->dirty = true;
+  if (!a->have_sel) return false;
+  XSetSelectionOwner(a->dpy, a->a_primary, a->win, CurrentTime);
+  return true;
+}
 bool sel_end(App *a, int x, int y) {
   px_to_cell(a, x, y, a->sel_l1, a->sel_c1);
   a->selecting = false;
@@ -116,21 +126,96 @@ bool sel_end(App *a, int x, int y) {
     a->dirty = true;
     return false;
   }
-  a->have_sel = true;
-  a->seltext = sel_extract(a);
-  if (a->seltext.empty()) {
-    a->have_sel = false;
-    a->dirty = true;
-    return false;
-  }
-  // Own PRIMARY so middle-click paste works here and in other apps.
-  XSetSelectionOwner(a->dpy, a->a_primary, a->win, CurrentTime);
-  a->dirty = true;
-  return true;
+  return sel_own(a);
 }
 void sel_clear(App *a) {
   a->have_sel = false;
   a->dirty = true;
+}
+
+// ---- word / line / extend selection ----
+static bool is_wordchar(uint32_t cp) {
+  if (cp == ' ' || cp == 0) return false;
+  if (cp < 128 && strchr("\t()[]{}<>'\"`|&;,", (int)cp)) return false;
+  return true;  // letters, digits, and path/URL-ish punctuation count as a word
+}
+void sel_word(App *a, int x, int y) {
+  int line, col;
+  px_to_cell(a, x, y, line, col);
+  std::vector<uint32_t> cps = line_cps(a, line);
+  int s = col, e = col;
+  if (is_wordchar(cps[col])) {
+    while (s > 0 && is_wordchar(cps[s - 1])) s--;
+    while (e < a->cols - 1 && is_wordchar(cps[e + 1])) e++;
+  }
+  a->sel_l0 = a->sel_l1 = line;
+  a->sel_c0 = s;
+  a->sel_c1 = e;
+  a->selecting = false;
+  sel_own(a);
+}
+void sel_line(App *a, int x, int y) {
+  int line, col;
+  px_to_cell(a, x, y, line, col);
+  std::vector<uint32_t> cps = line_cps(a, line);
+  int e = a->cols - 1;
+  while (e > 0 && (cps[e] == ' ' || cps[e] == 0)) e--;  // to last non-blank
+  a->sel_l0 = a->sel_l1 = line;
+  a->sel_c0 = 0;
+  a->sel_c1 = e;
+  a->selecting = false;
+  sel_own(a);
+}
+void sel_extend(App *a, int x, int y) {
+  px_to_cell(a, x, y, a->sel_l1, a->sel_c1);  // keep the anchor, move the head
+  a->selecting = false;
+  sel_own(a);
+}
+void selection_autoscroll_tick(App *a) {
+  if (!a->selecting) return;
+  const Rect &o = a->r_out;
+  int N = (int)a->sb.size();
+  int before = a->scroll;
+  if (a->drag_y < o.y + 1) a->scroll = std::min(a->scroll + 1, N);        // above → older
+  else if (a->drag_y > o.y + o.h - 1) a->scroll = std::max(a->scroll - 1, 0);  // below → newer
+  if (a->scroll != before) {
+    sel_update(a, a->drag_x, a->drag_y);  // re-extend the head into the new row
+    a->dirty = true;
+  }
+}
+
+// ---- clickable URLs ----
+static bool is_urlchar(uint32_t cp) {
+  if (cp <= ' ' || cp >= 127) return false;
+  return !strchr("()<>\"'`{}|\\^", (int)cp);
+}
+bool open_url_at(App *a, int x, int y) {
+  int line, col;
+  px_to_cell(a, x, y, line, col);
+  std::vector<uint32_t> cps = line_cps(a, line);
+  if (!is_urlchar(cps[col])) return false;
+  int s = col, e = col;
+  while (s > 0 && is_urlchar(cps[s - 1])) s--;
+  while (e < a->cols - 1 && is_urlchar(cps[e + 1])) e++;
+  std::string tok;
+  for (int c = s; c <= e; c++) {
+    char u8[4];
+    tok.append(u8, enc_utf8(cps[c], u8));
+  }
+  std::string url;
+  if (tok.compare(0, 7, "http://") == 0 || tok.compare(0, 8, "https://") == 0)
+    url = tok;
+  else if (tok.compare(0, 4, "www.") == 0)
+    url = "https://" + tok;
+  else
+    return false;
+  while (!url.empty() && strchr(".,;:!?", url.back())) url.pop_back();  // trailing punct
+  pid_t pid = fork();
+  if (pid == 0) {
+    execlp("xdg-open", "xdg-open", url.c_str(), (char *)nullptr);
+    _exit(127);
+  }
+  return pid > 0;
 }
 
 // ---- clipboard ops ----
@@ -186,7 +271,14 @@ void on_selection_notify(App *a, XSelectionEvent *e) {
   XFree(data);
   if (text.empty()) return;
   if (a->paste_to_pty) {
-    (void)!write(a->master, text.c_str(), text.size());  // raw, like any paste
+    // Bracketed paste (if the app enabled it) lets it tell typed input from
+    // pasted text, so a multi-line paste doesn't auto-run line by line.
+    if (a->bracket_paste) {
+      std::string w = "\x1b[200~" + text + "\x1b[201~";
+      (void)!write(a->master, w.c_str(), w.size());
+    } else {
+      (void)!write(a->master, text.c_str(), text.size());
+    }
   } else {
     // Into the command box: a single line, so flatten newlines and drop a
     // trailing one (don't auto-submit on paste).

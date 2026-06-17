@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 // ===================== submit ============================================
@@ -291,9 +292,39 @@ void on_key(App *a, XKeyEvent *ev) {
     a->dirty = true;
   }
 }
+// X modifier state → libvterm modifiers.
+static VTermModifier vmods(unsigned state) {
+  VTermModifier m = VTERM_MOD_NONE;
+  if (state & ShiftMask) m = (VTermModifier)(m | VTERM_MOD_SHIFT);
+  if (state & ControlMask) m = (VTermModifier)(m | VTERM_MOD_CTRL);
+  if (state & Mod1Mask) m = (VTermModifier)(m | VTERM_MOD_ALT);
+  return m;
+}
+// Map a pixel to a live-screen (row, col); false if outside the output grid.
+static bool px_to_screen(App *a, int x, int y, int &row, int &col) {
+  if (!a->r_out.hit(x, y)) return false;
+  row = (y - (a->r_out.y + 1)) / a->ch;
+  col = (x - (a->r_out.x + 3)) / a->cw;
+  return row >= 0 && row < a->rows && col >= 0 && col < a->cols;
+}
+// Should this mouse event go to the running program? Only when it enabled mouse
+// reporting, we're at the live screen (not scrolled back), and Shift isn't held
+// (Shift is the universal "let me select locally instead" override).
+static bool mouse_to_app(App *a, XButtonEvent *ev) {
+  return a->mouse_mode && a->scroll == 0 && !(ev->state & ShiftMask) &&
+         a->r_out.hit(ev->x, ev->y);
+}
+
 void on_button(App *a, XButtonEvent *ev) {
-  if (ev->button == 4 || ev->button == 5) {  // wheel scroll over output
+  if (ev->button == 4 || ev->button == 5) {  // wheel
     if (a->r_out.hit(ev->x, ev->y)) {
+      if (mouse_to_app(a, ev)) {  // forward the wheel to the app (less/vim/…)
+        int row, col;
+        px_to_screen(a, ev->x, ev->y, row, col);
+        vterm_mouse_move(a->vt, row, col, vmods(ev->state));
+        vterm_mouse_button(a->vt, ev->button, true, vmods(ev->state));
+        return;
+      }
       int N = a->sb.size();
       a->scroll += (ev->button == 4 ? 3 : -3);
       a->scroll = std::max(0, std::min(a->scroll, N));
@@ -301,11 +332,25 @@ void on_button(App *a, XButtonEvent *ev) {
     }
     return;
   }
+  // Forward clicks to the app's mouse handler when it wants them.
+  if ((ev->button == 1 || ev->button == 2 || ev->button == 3) &&
+      mouse_to_app(a, ev)) {
+    int row, col;
+    px_to_screen(a, ev->x, ev->y, row, col);
+    vterm_mouse_move(a->vt, row, col, vmods(ev->state));
+    vterm_mouse_button(a->vt, ev->button, true, vmods(ev->state));
+    a->mouse_to_app = true;
+    return;
+  }
   if (ev->button == 2) {  // middle-click → paste the PRIMARY selection
     paste_request(a, false);
     return;
   }
   if (ev->button != 1) return;
+  // Ctrl+click a URL in the output opens it.
+  if ((ev->state & ControlMask) && a->r_out.hit(ev->x, ev->y) &&
+      open_url_at(a, ev->x, ev->y))
+    return;
   // Widgets first so the resize zones never swallow a button click.
   if (a->r_close.hit(ev->x, ev->y)) {
     a->running = false;
@@ -347,10 +392,19 @@ void on_button(App *a, XButtonEvent *ev) {
     wm_moveresize(a, ev->x_root, ev->y_root, dir);
     return;
   }
-  // Press in the output pane begins a text selection. A release without drag is
-  // treated as a plain click (focus the terminal) in on_release().
+  // Press in the output pane begins/extends a text selection. A bare single
+  // click (no drag) is treated as focus-the-terminal in on_release().
   if (a->r_out.hit(ev->x, ev->y)) {
-    sel_begin(a, ev->x, ev->y);
+    bool near = abs(ev->x - a->click_x) <= a->cw && abs(ev->y - a->click_y) <= a->ch;
+    if (ev->time - a->last_click < 400 && near) a->click_count++;
+    else a->click_count = 1;
+    a->last_click = ev->time;
+    a->click_x = ev->x;
+    a->click_y = ev->y;
+    if ((ev->state & ShiftMask) && a->have_sel) sel_extend(a, ev->x, ev->y);
+    else if (a->click_count == 2) sel_word(a, ev->x, ev->y);
+    else if (a->click_count >= 3) sel_line(a, ev->x, ev->y);
+    else sel_begin(a, ev->x, ev->y);
     return;
   }
   if (ev->y >= a->H - a->input_h) {
@@ -364,6 +418,16 @@ void on_button(App *a, XButtonEvent *ev) {
   }
 }
 void on_release(App *a, XButtonEvent *ev) {
+  if (a->mouse_to_app) {  // release belongs to a click we forwarded to the app
+    if (ev->button >= 1 && ev->button <= 3) {
+      int row, col;
+      if (px_to_screen(a, ev->x, ev->y, row, col))
+        vterm_mouse_move(a->vt, row, col, vmods(ev->state));
+      vterm_mouse_button(a->vt, ev->button, false, vmods(ev->state));
+    }
+    a->mouse_to_app = false;
+    return;
+  }
   if (ev->button != 1 || !a->selecting) return;
   // A drag selects + copies (sel_end owns PRIMARY); a bare click focuses the
   // terminal so keystrokes pass through to the running program.
@@ -373,5 +437,17 @@ void on_release(App *a, XButtonEvent *ev) {
   }
 }
 void on_motion(App *a, XMotionEvent *ev) {
-  if (a->selecting) sel_update(a, ev->x, ev->y);
+  if (a->mouse_to_app) {  // drag-reporting apps (tmux pane resize, etc.)
+    if (a->mouse_mode >= VTERM_PROP_MOUSE_DRAG) {
+      int row, col;
+      if (px_to_screen(a, ev->x, ev->y, row, col))
+        vterm_mouse_move(a->vt, row, col, vmods(ev->state));
+    }
+    return;
+  }
+  if (a->selecting) {
+    a->drag_x = ev->x;
+    a->drag_y = ev->y;  // remembered so the main loop can edge-auto-scroll
+    sel_update(a, ev->x, ev->y);
+  }
 }

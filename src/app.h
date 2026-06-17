@@ -60,6 +60,10 @@ struct App {
   // vterm
   VTerm *vt = nullptr;
   VTermScreen *vts = nullptr;
+  VTermState *vst = nullptr;   // for line-info (resize reflow)
+  int mouse_mode = 0;          // VTERM_PROP_MOUSE_* the app enabled (0 = none)
+  bool bracket_paste = false;  // app enabled bracketed paste (DECSET 2004)
+  std::string vt_tail;         // last bytes of pty output (split-sequence scan)
   int master = -1;
   pid_t child = -1;
   int rows = 24, cols = 80;
@@ -92,10 +96,16 @@ struct App {
   // buffer: line < |sb| indexes scrollback, else the live row (line - |sb|).
   bool selecting = false;  // a mouse drag is in progress
   bool have_sel = false;   // a finalized selection (highlight + seltext) exists
+  bool mouse_to_app = false;   // current press was forwarded to the app's mouse
   int sel_l0 = 0, sel_c0 = 0;  // drag anchor
   int sel_l1 = 0, sel_c1 = 0;  // drag head (current)
   std::string seltext;     // PRIMARY selection text we serve
   std::string clip;        // CLIPBOARD text we serve (Ctrl+Shift+C)
   bool paste_to_pty = false;   // pending paste: deliver to the app vs the box
   Atom a_primary = 0, a_clipboard = 0, a_utf8 = 0, a_targets = 0, a_seldata = 0;
+  // multi-click + drag tracking
+  Time last_click = 0;     // time of the previous button-1 press
+  int click_count = 0;     // 1=single 2=double(word) 3=triple(line)
+  int click_x = 0, click_y = 0;  // where the previous click landed
+  int drag_x = 0, drag_y = 0;    // last drag position (for edge auto-scroll)
 };
