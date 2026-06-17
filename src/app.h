@@ -118,4 +118,9 @@ struct App {
   int click_x = 0, click_y = 0;  // where the previous click landed
   int drag_x = 0, drag_y = 0;    // last drag position (for edge auto-scroll)
   time_t theme_mtime = 0;        // newest mtime of the theme files (hot-reload)
+  // scrollback search (Ctrl+Shift+F)
+  bool searching = false;
+  std::string search;            // the live query
+  std::vector<int> search_hits;  // visual line indices containing the query
+  int search_idx = -1;           // which hit we're parked on
 };

@@ -51,7 +51,8 @@ A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
   own colors are never overridden (toggle with `color_lines`).
 - Full interactive shell — your real `~/.zshrc` + starship prompt, zle line
   editing, echo. `exit` closes the window (zsh is our child; if it dies, we die).
-- **Scrollback**: mouse-wheel over the output pane (50_000-line buffer).
+- **Scrollback**: mouse-wheel over the output pane (50_000-line buffer), with
+  **search** (`Ctrl+Shift+F`) that jumps between matches and highlights them.
 
 The shell is launched via a private `ZDOTDIR` (`runtime/.zshrc`) that simply
 sources your real `~/.zshrc`; your config is never modified.
@@ -78,6 +79,7 @@ Runs natively on X11, and on Wayland via XWayland (no flags needed).
 | Up / Down *(box)* | navigate the dropdown, or recall history when closed |
 | Esc *(box)* | close the dropdown |
 | Ctrl+R *(box)* | rescan the command/alias completion list |
+| Ctrl+Shift+F | search the scrollback (Enter/↑ older, ↓ newer, Esc out) |
 | Drag over output | select text (copies to `PRIMARY`); drag past an edge auto-scrolls |
 | Double / triple-click | select word / whole line |
 | Shift-click | extend the current selection |
@@ -129,7 +131,8 @@ The app is split into small modules under `src/`, all sharing the central
 - `src/terminal.*` — libvterm engine, pty/shell spawn, grid + font sizing/zoom.
 - `src/render.*` — the VGUI chrome + terminal-grid compositor (Xft), screenshots.
 - `src/input.*` — keyboard/mouse handling, passthrough, command submission.
-- `src/selection.*` — X11 clipboard + mouse text selection (PRIMARY/CLIPBOARD).
+- `src/selection.*` — X11 clipboard + mouse text selection + OSC 52.
+- `src/search.*` — scrollback search (query state + match navigation).
 - `src/completion.*` — `$PATH` + alias + history + fuzzy autocomplete.
 - `src/theme.*` — the `Theme` struct and `colors.conf` loader.
 - `src/png.*` — minimal PNG writer (debug screenshots).

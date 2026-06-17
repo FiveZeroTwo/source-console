@@ -12,6 +12,7 @@
 #include "completion.h"
 #include "input.h"
 #include "render.h"
+#include "search.h"
 #include "selection.h"
 #include "terminal.h"
 #include "theme.h"
@@ -294,6 +295,10 @@ int main() {
           submit(&a);
       }
       if (dt > 2.0) {
+        if (const char *sq = getenv("SRCTERM_SEARCH")) {  // open search for a shot
+          search_open(&a);
+          for (const char *p = sq; *p; p++) search_key(&a, (KeySym)*p, p, 1);
+        }
         render(&a);
         if (shoot) screenshot(&a, shoot);
         if (getenv("SRCTERM_CLIPTEST"))

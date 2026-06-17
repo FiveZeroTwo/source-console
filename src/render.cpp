@@ -141,6 +141,15 @@ void render(App *a) {
     int cls = a->th.color_lines ? classify_line(row_text(a, vidx, N)) : 0;
     XftColor *tint =
         cls == 2 ? colh(a, a->th.error) : cls == 1 ? colh(a, a->th.warn) : nullptr;
+    // Mark columns that are part of a scrollback-search match on this row.
+    std::vector<char> smark;
+    if (a->searching && !a->search.empty()) {
+      std::string rt = lower(row_text(a, vidx, N)), q = lower(a->search);
+      smark.assign(a->cols, 0);
+      for (size_t p = rt.find(q); p != std::string::npos; p = rt.find(q, p + q.size()))
+        for (size_t k = 0; k < q.size() && (int)(p + k) < a->cols; k++)
+          smark[p + k] = 1;
+    }
     for (int c = 0; c < a->cols; c++) {
       int px = o.x + 3 + c * a->cw;
       uint32_t cp = 0;
@@ -177,7 +186,8 @@ void render(App *a) {
       }
       int cellw = width == 2 ? 2 * a->cw : a->cw;  // wide cells span two columns
       bool bold = attrs & ATTR_BOLD, italic = attrs & ATTR_ITALIC;
-      if (cell_in_selection(a, vidx, c))
+      bool hl = cell_in_selection(a, vidx, c) || (!smark.empty() && smark[c]);
+      if (hl)
         fillr(a, px, py, cellw, a->ch, colh(a, a->th.highlight));
       else if (br != defr || bgc != defg || bb != defb)
         fillr(a, px, py, cellw, a->ch, col(a, br, bgc, bb));
@@ -244,20 +254,35 @@ void render(App *a) {
   fillr(a, fld.x + 1, fld.y + 1, fld.w - 2, fld.h - 2, colh(a, a->th.entry_bg));
   XftColor *fldfg = colh(a, a->th.fg);
   int tx = fld.x + a->S(6), ty = fld.y + a->uiasc + a->S(3);
-  if (!a->input.empty())
-    text(a, tx, ty, a->input, fldfg);
-  else if (pt)
-    text(a, tx, ty, "passthrough — keys go to the terminal  (Ctrl+` for box)",
-         colh(a, a->th.dark));
-  else
-    text(a, tx, ty, "enter command…", colh(a, a->th.dark));
-  if (!pt) {  // box caret whenever the box owns the keyboard
+  if (a->searching) {  // the field becomes the scrollback-search query bar
+    std::string label = "search: " + a->search;
+    if (!a->search.empty())
+      label += a->search_hits.empty()
+                   ? "   (no matches)"
+                   : "   (" + std::to_string(a->search_idx + 1) + "/" +
+                         std::to_string((int)a->search_hits.size()) + ")";
+    text(a, tx, ty, label, colh(a, a->th.accent));
+    std::string pre = "search: " + a->search;  // caret after the query
     XGlyphInfo gi;
-    XftTextExtentsUtf8(a->dpy, a->uifont, (const FcChar8 *)a->input.c_str(),
-                       a->caret, &gi);
-    int cx = tx + gi.xOff;
-    line(a, cx, fld.y + a->S(4), cx, fld.y + fld.h - a->S(4),
+    XftTextExtentsUtf8(a->dpy, a->uifont, (const FcChar8 *)pre.c_str(), pre.size(), &gi);
+    line(a, tx + gi.xOff, fld.y + a->S(4), tx + gi.xOff, fld.y + fld.h - a->S(4),
          colh(a, a->th.cursor));
+  } else {
+    if (!a->input.empty())
+      text(a, tx, ty, a->input, fldfg);
+    else if (pt)
+      text(a, tx, ty, "passthrough — keys go to the terminal  (Ctrl+` for box)",
+           colh(a, a->th.dark));
+    else
+      text(a, tx, ty, "enter command…", colh(a, a->th.dark));
+    if (!pt) {  // box caret whenever the box owns the keyboard
+      XGlyphInfo gi;
+      XftTextExtentsUtf8(a->dpy, a->uifont, (const FcChar8 *)a->input.c_str(),
+                         a->caret, &gi);
+      int cx = tx + gi.xOff;
+      line(a, cx, fld.y + a->S(4), cx, fld.y + fld.h - a->S(4),
+           colh(a, a->th.cursor));
+    }
   }
   // submit button (text centered)
   bevel(a, a->r_submit.x, a->r_submit.y, a->r_submit.w, a->r_submit.h, true);

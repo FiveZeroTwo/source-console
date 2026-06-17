@@ -1,6 +1,7 @@
 #include "input.h"
 
 #include "completion.h"
+#include "search.h"
 #include "selection.h"
 #include "terminal.h"
 #include "util.h"
@@ -155,13 +156,17 @@ void on_key(App *a, XKeyEvent *ev) {
     a->dirty = true;
     return;
   }
-  if (ctrl && shift) {  // clipboard: Ctrl+Shift+C copy, Ctrl+Shift+V paste
+  if (ctrl && shift) {  // clipboard + scrollback search
     if (ks == XK_C || ks == XK_c) {
       copy_clipboard(a);
       return;
     }
     if (ks == XK_V || ks == XK_v) {
       paste_request(a, true);
+      return;
+    }
+    if (ks == XK_F || ks == XK_f) {
+      a->searching ? search_close(a) : search_open(a);
       return;
     }
   }
@@ -191,6 +196,12 @@ void on_key(App *a, XKeyEvent *ev) {
       scale_app(a, 0);
       return;
     }
+  }
+
+  // While searching the scrollback, keys edit the query / navigate matches.
+  if (a->searching) {
+    search_key(a, ks, b, n);
+    return;
   }
 
   // Keys go to the running application only when one actually owns the tty;
