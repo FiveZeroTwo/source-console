@@ -21,6 +21,10 @@ struct Theme {
   // behavior toggles
   bool show_cwd = true;      // show the shell's cwd in the titlebar + prompt echo
   bool echo_command = true;  // echo each submitted command into the output log
+  // Source-style line coloring: tint default-fg output by content (off = never).
+  bool color_lines = true;
+  std::string warn = "#e6c46a";   // lines that look like warnings → yellow
+  std::string error = "#d6786a";  // lines that look like errors   → red
 };
 
 // Load colors/font from $XDG_CONFIG_HOME/srcterm/colors.conf (or ~/.config/…),

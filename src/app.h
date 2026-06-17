@@ -82,9 +82,20 @@ struct App {
   std::vector<std::string> matchdisp;  // short label shown in the popup
   int sel = -1;
   bool popup = false;
+  bool fuzzy = false;          // current matches came from fuzzy (not prefix) search
   bool match_is_path = false;  // matches are filesystem paths (vs command names)
   std::string cwd;             // shell's current dir (from /proc/<shell>/cwd)
   // hit rects
   Rect r_title, r_min, r_close, r_submit, r_grip, r_out;
   bool running = true, dirty = true;
+  // X selection / clipboard. Selection coords are (line, col) in the visual
+  // buffer: line < |sb| indexes scrollback, else the live row (line - |sb|).
+  bool selecting = false;  // a mouse drag is in progress
+  bool have_sel = false;   // a finalized selection (highlight + seltext) exists
+  int sel_l0 = 0, sel_c0 = 0;  // drag anchor
+  int sel_l1 = 0, sel_c1 = 0;  // drag head (current)
+  std::string seltext;     // PRIMARY selection text we serve
+  std::string clip;        // CLIPBOARD text we serve (Ctrl+Shift+C)
+  bool paste_to_pty = false;   // pending paste: deliver to the app vs the box
+  Atom a_primary = 0, a_clipboard = 0, a_utf8 = 0, a_targets = 0, a_seldata = 0;
 };

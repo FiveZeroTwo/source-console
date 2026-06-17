@@ -42,6 +42,9 @@ void load_theme(Theme &t) {
       else if (k == "show_cwd" || k == "cwd") t.show_cwd = parse_bool(v, t.show_cwd);
       else if (k == "echo_command" || k == "echo")
         t.echo_command = parse_bool(v, t.echo_command);
+      else if (k == "color_lines") t.color_lines = parse_bool(v, t.color_lines);
+      else if (k == "warn" || k == "warn_color" || k == "warning") col(t.warn);
+      else if (k == "error" || k == "error_color") col(t.error);
       else if (k == "face" || k == "frame_face") col(t.face);
       else if (k == "light" || k == "frame_light") col(t.light);
       else if (k == "dark" || k == "frame_dark") col(t.dark);

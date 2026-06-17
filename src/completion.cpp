@@ -156,27 +156,86 @@ static void complete_path(App *a, const std::string &tok, bool dirs_only) {
     if ((int)a->matches.size() >= MAXCOMP) break;
   }
 }
+// Subsequence fuzzy score over already-lowercased strings: every char of
+// `needle` must appear in `hay` in order. Returns a cost (lower = better, favors
+// early + contiguous matches) or -1 if `needle` isn't a subsequence of `hay`.
+static int fuzzy_score(const std::string &hay, const std::string &needle) {
+  if (needle.empty()) return -1;
+  size_t j = 0;
+  int first = -1, last = 0, gaps = 0;
+  bool prev = false;
+  for (size_t i = 0; i < hay.size() && j < needle.size(); i++) {
+    if (hay[i] == needle[j]) {
+      if (first < 0) first = (int)i;
+      last = (int)i;
+      if (!prev && j > 0) gaps++;  // a break in the run after the first char
+      prev = true;
+      j++;
+    } else {
+      prev = false;
+    }
+  }
+  if (j < needle.size()) return -1;
+  return first + (last - first) + gaps;
+}
+
 void update_completion(App *a) {
   a->matches.clear();
   a->matchdisp.clear();
   a->popup = false;
   a->sel = -1;
+  a->fuzzy = false;
   a->match_is_path = false;
   if (a->input.empty()) return;
+
+  std::set<std::string> seen;
+  auto add = [&](const std::string &ins, const std::string &disp) {
+    if (ins.empty() || !seen.insert(ins).second) return;
+    a->matches.push_back(ins);
+    a->matchdisp.push_back(disp);
+  };
+  auto full = [&]() { return (int)a->matches.size() >= MAXCOMP; };
+  // Past command lines whose start matches `pfx` (already lowercased), most
+  // recent first, shown with a recall marker.
+  auto add_history = [&](const std::string &pfx) {
+    for (auto it = a->history.rbegin(); it != a->history.rend() && !full(); ++it)
+      if (lower(*it).compare(0, pfx.size(), pfx) == 0) add(*it, "↺ " + *it);
+  };
+
   size_t sp = a->input.find_last_of(' ');
-  if (sp == std::string::npos) {  // first word → complete command names
+  if (sp == std::string::npos) {  // first word → commands, then history recall
     std::string pfx = lower(a->input);
-    for (const auto &c : a->commands)
-      if (lower(c).compare(0, pfx.size(), pfx) == 0) {
-        a->matches.push_back(c);
-        a->matchdisp.push_back(c);
-        if ((int)a->matches.size() >= MAXCOMP) break;
+    // 1) command/alias names by prefix (a->commands is sorted)
+    for (const auto &c : a->commands) {
+      if (full()) break;
+      if (lower(c).compare(0, pfx.size(), pfx) == 0) add(c, c);
+    }
+    // 2) matching past command lines (recall)
+    add_history(pfx);
+    // 3) nothing matched a prefix → fall back to fuzzy over commands
+    if (a->matches.empty()) {
+      std::vector<std::pair<int, std::string>> hits;
+      for (const auto &c : a->commands) {
+        int s = fuzzy_score(lower(c), pfx);
+        if (s >= 0) hits.push_back({s, c});
       }
-  } else {  // an argument → complete filesystem paths
+      std::stable_sort(hits.begin(), hits.end(),
+                       [](const auto &x, const auto &y) { return x.first < y.first; });
+      for (auto &h : hits) {
+        if (full()) break;
+        add(h.second, h.second);
+      }
+      if (!a->matches.empty()) a->fuzzy = true;
+    }
+  } else {  // an argument → filesystem paths, with a history-line fallback
     a->match_is_path = true;
     std::string cmd0 = a->input.substr(0, a->input.find(' '));
     bool dirs_only = cmd0 == "cd" || cmd0 == "pushd" || cmd0 == "rmdir";
     complete_path(a, a->input.substr(sp + 1), dirs_only);
+    if (a->matches.empty()) {  // no path hit → recall matching past command lines
+      a->match_is_path = false;
+      add_history(lower(a->input));
+    }
   }
   if (!a->matches.empty()) {
     a->popup = true;
@@ -199,4 +258,31 @@ void accept_completion(App *a) {
   // After completing a directory, immediately offer its contents.
   if (dir) update_completion(a);
   a->dirty = true;
+}
+
+void tab_complete(App *a) {
+  if (a->sel < 0 || a->matches.empty()) return;
+  // Prefix matches: a single Tab fills in the longest unambiguous common prefix
+  // (shell-style) before committing to one entry. Fuzzy matches share no useful
+  // prefix, so Tab just accepts the highlighted one.
+  if (!a->fuzzy && a->matches.size() > 1) {
+    std::string lcp = a->matches[0];
+    for (const auto &m : a->matches) {
+      size_t k = 0;
+      while (k < lcp.size() && k < m.size() && lcp[k] == m[k]) k++;
+      lcp.resize(k);
+      if (lcp.empty()) break;
+    }
+    size_t sp = a->input.find_last_of(' ');
+    std::string head = sp == std::string::npos ? "" : a->input.substr(0, sp + 1);
+    std::string tok = sp == std::string::npos ? a->input : a->input.substr(sp + 1);
+    if (lcp.size() > tok.size()) {  // unambiguous progress → extend, keep popup
+      a->input = head + lcp;
+      a->caret = a->input.size();
+      update_completion(a);
+      a->dirty = true;
+      return;
+    }
+  }
+  accept_completion(a);
 }

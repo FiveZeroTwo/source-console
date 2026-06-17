@@ -9,6 +9,8 @@ src/*.o
 
 # debug screenshots
 *.png
+# except the README preview
+!docs/screenshot.png
 
 # generated zsh completion cache
 runtime/.zcompdump*

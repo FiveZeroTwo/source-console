@@ -36,6 +36,7 @@ static int cb_pushline(int cols, const VTermScreenCell *cells, void *u) {
   }
   a->sb.push_back(std::move(ln));
   if (a->sb.size() > 5000) a->sb.pop_front();
+  a->have_sel = false;  // selection coords are now stale; copied text is kept
   return 1;
 }
 // `clear`'s \e[3J asks to drop the scrollback; flush our own buffer so the

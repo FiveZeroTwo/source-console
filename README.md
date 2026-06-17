@@ -12,6 +12,8 @@ shell                   : zsh via forkpty() (full interactive)
 
 A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
 
+![srcterm — the Source developer console look](docs/screenshot.png)
+
 - Classic VGUI look: beveled "Console" window, Submit button, scrollbar — all
   hand-drawn. Drag the title bar to move, any edge/corner to resize, `_`/`x` to
   minimise/close.
@@ -22,8 +24,19 @@ A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
     modern terminal. A block cursor marks the shell/app cursor. Click the
     terminal area to enter this mode.
   - **Command box**: type in the bottom field and press Enter / Submit to run a
-    line; `Up`/`Down` recall history; a `$PATH` autocomplete dropdown appears
-    (`Tab` accepts). Click the input bar to enter this mode.
+    line; `Up`/`Down` recall history; a smart autocomplete dropdown appears
+    (`Tab` extends to the common prefix, then accepts). Click the input bar to
+    enter this mode.
+- **Smart completion**: `$PATH` executables + shell aliases + history recall,
+  with a fuzzy (subsequence) fallback when nothing matches by prefix, and
+  shell-style longest-common-prefix expansion on `Tab`.
+- **Clipboard / X selections**: drag over the output pane to select (we own
+  `PRIMARY`); middle-click pastes `PRIMARY`, `Ctrl+Shift+V` pastes `CLIPBOARD`,
+  `Ctrl+Shift+C` copies the selection to `CLIPBOARD`. Paste lands in the command
+  box, or in the running program when it owns the terminal.
+- **Color-coded output**, Source-style: lines that look like warnings are tinted
+  yellow and errors red — but only their default-colored text, so a program's
+  own colors are never overridden (toggle with `color_lines`).
 - Full interactive shell — your real `~/.zshrc` + starship prompt, zle line
   editing, echo. `exit` closes the window (zsh is our child; if it dies, we die).
 - **Scrollback**: mouse-wheel over the output pane (50_000-line buffer).
@@ -49,10 +62,13 @@ Runs natively on X11, and on Wayland via XWayland (no flags needed).
 | Ctrl+` | toggle passthrough ⇄ command box (or click the area) |
 | *(passthrough)* any key | sent to the running program (vim/htop/shell/…) |
 | Enter / Submit *(box)* | run the field's command in the shell |
-| Tab *(box)* | accept the highlighted autocomplete entry |
+| Tab *(box)* | extend to the matches' common prefix, else accept the highlighted entry |
 | Up / Down *(box)* | navigate the dropdown, or recall history when closed |
 | Esc *(box)* | close the dropdown |
 | Ctrl+R *(box)* | rescan the command/alias completion list |
+| Drag over output | select text (copies to `PRIMARY`) |
+| Middle-click | paste the `PRIMARY` selection |
+| Ctrl+Shift+C / Ctrl+Shift+V | copy selection / paste from `CLIPBOARD` |
 | Mouse wheel (over output) | scroll the scrollback |
 | Ctrl + `+` / `-` / `0` | scale the **whole app** (font + chrome) up / down / reset |
 | Ctrl+Shift + `+` / `-` / `0` | scale only the UI chrome (fine-tune) |
@@ -97,7 +113,8 @@ The app is split into small modules under `src/`, all sharing the central
 - `src/terminal.*` — libvterm engine, pty/shell spawn, grid + font sizing/zoom.
 - `src/render.*` — the VGUI chrome + terminal-grid compositor (Xft), screenshots.
 - `src/input.*` — keyboard/mouse handling, passthrough, command submission.
-- `src/completion.*` — `$PATH` + alias autocomplete for the command box.
+- `src/selection.*` — X11 clipboard + mouse text selection (PRIMARY/CLIPBOARD).
+- `src/completion.*` — `$PATH` + alias + history + fuzzy autocomplete.
 - `src/theme.*` — the `Theme` struct and `colors.conf` loader.
 - `src/png.*` — minimal PNG writer (debug screenshots).
 - `src/util.*` — shared string / hex / UTF-8 helpers.
@@ -106,7 +123,7 @@ The app is split into small modules under `src/`, all sharing the central
 
 ## Possible next steps
 
-- Clipboard (X selections) — copy from the pane, paste into the field.
-- Color-coded output lines (warnings yellow / errors red), Source-style.
 - Tie the palette to the active `rice` theme.
-- Smarter completion (history, aliases, fuzzy, common-prefix on Tab).
+- Rectangular (block) selection; double/triple-click word/line select.
+- Bracketed-paste mode for the passthrough terminal.
+- Smarter completion still: per-directory history, fuzzy paths.

@@ -12,7 +12,9 @@ bool app_owns_tty(App *a);
 bool key_to_app(App *a);
 
 void on_key(App *a, XKeyEvent *ev);
-void on_button(App *a, XButtonEvent *ev);
+void on_button(App *a, XButtonEvent *ev);      // ButtonPress
+void on_release(App *a, XButtonEvent *ev);     // ButtonRelease (finish a selection)
+void on_motion(App *a, XMotionEvent *ev);      // drag → extend the selection
 
 // Ask the WM to start an interactive move/resize (_NET_WM_MOVERESIZE dir).
 void wm_moveresize(App *a, int xr, int yr, int dir);

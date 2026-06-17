@@ -12,6 +12,7 @@
 #include "completion.h"
 #include "input.h"
 #include "render.h"
+#include "selection.h"
 #include "terminal.h"
 #include "theme.h"
 #include "util.h"
@@ -51,6 +52,7 @@ int main() {
   a.root = RootWindow(a.dpy, a.scr);
   a.vis = DefaultVisual(a.dpy, a.scr);
   a.cmap = DefaultColormap(a.dpy, a.scr);
+  selection_init(&a);  // intern clipboard/selection atoms
 
   // font: split "Family Name 11" into family + point size, then load.
   a.fontfam = a.th.font;
@@ -79,7 +81,7 @@ int main() {
                               colh(&a, a.th.face)->pixel);
   XSelectInput(a.dpy, a.win,
                ExposureMask | KeyPressMask | ButtonPressMask |
-                   StructureNotifyMask);
+                   ButtonReleaseMask | Button1MotionMask | StructureNotifyMask);
   // borderless (Motif hint), but still WM-managed (movable/resizable)
   struct {
     unsigned long flags, functions, decorations;
@@ -192,6 +194,21 @@ int main() {
         case ButtonPress:
           on_button(&a, &e.xbutton);
           break;
+        case ButtonRelease:
+          on_release(&a, &e.xbutton);
+          break;
+        case MotionNotify:
+          on_motion(&a, &e.xmotion);
+          break;
+        case SelectionRequest:
+          on_selection_request(&a, &e.xselectionrequest);
+          break;
+        case SelectionNotify:
+          on_selection_notify(&a, &e.xselection);
+          break;
+        case SelectionClear:
+          on_selection_clear(&a, &e.xselectionclear);
+          break;
         case ConfigureNotify:
           if (e.xconfigure.width != a.W || e.xconfigure.height != a.H) {
             a.W = e.xconfigure.width;
@@ -233,6 +250,20 @@ int main() {
       double dt = (now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9;
       if (!seeded && dt > 0.8) {
         seeded = true;
+        // Clipboard round-trip: select the banner row (owns PRIMARY), then paste
+        // PRIMARY into the box — exercises serve + receive end to end.
+        if (getenv("SRCTERM_CLIPTEST")) {
+          Rect o = a.r_out;
+          int y = o.y + 1 + a.ch / 2;
+          int ex = o.x + 3 + 13 * a.cw + a.cw / 2;  // through col 13 = "Source Console"
+          sel_begin(&a, o.x + 3 + a.cw / 2, y);
+          sel_update(&a, ex, y);
+          sel_end(&a, ex, y);
+          a.passthrough = false;     // box mode → paste lands in the field
+          paste_request(&a, false);  // PRIMARY (we own it) → round-trip → a.input
+          a.dirty = true;
+          continue;
+        }
         // Exercise the passthrough path: type each char + Enter via libvterm.
         if (const char *pt = getenv("SRCTERM_PTTEST")) {
           for (const char *p = pt; *p; p++)
@@ -264,6 +295,9 @@ int main() {
       if (dt > 2.0) {
         render(&a);
         if (shoot) screenshot(&a, shoot);
+        if (getenv("SRCTERM_CLIPTEST"))
+          fprintf(stderr, "CLIPTEST seltext=[%s] pasted=[%s]\n",
+                  a.seltext.c_str(), a.input.c_str());
         fprintf(stderr, "SELFTEST OK: %dx%d grid %dx%d, %zu commands\n", a.W,
                 a.H, a.cols, a.rows, a.commands.size());
         a.running = false;

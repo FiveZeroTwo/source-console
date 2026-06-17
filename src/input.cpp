@@ -1,6 +1,7 @@
 #include "input.h"
 
 #include "completion.h"
+#include "selection.h"
 #include "terminal.h"
 #include "util.h"
 
@@ -153,6 +154,16 @@ void on_key(App *a, XKeyEvent *ev) {
     a->dirty = true;
     return;
   }
+  if (ctrl && shift) {  // clipboard: Ctrl+Shift+C copy, Ctrl+Shift+V paste
+    if (ks == XK_C || ks == XK_c) {
+      copy_clipboard(a);
+      return;
+    }
+    if (ks == XK_V || ks == XK_v) {
+      paste_request(a, true);
+      return;
+    }
+  }
   if (ctrl && shift) {  // Ctrl+Shift +/-/0 : scale the whole UI (chrome)
     if (ks == XK_plus || ks == XK_equal || ks == XK_KP_Add) {
       set_ui_scale(a, a->uiscale + 0.1);
@@ -196,7 +207,7 @@ void on_key(App *a, XKeyEvent *ev) {
 
   if (a->popup) {
     if (ks == XK_Tab) {
-      accept_completion(a);
+      tab_complete(a);
       return;
     }
     if (ks == XK_Down) {
@@ -290,6 +301,10 @@ void on_button(App *a, XButtonEvent *ev) {
     }
     return;
   }
+  if (ev->button == 2) {  // middle-click → paste the PRIMARY selection
+    paste_request(a, false);
+    return;
+  }
   if (ev->button != 1) return;
   // Widgets first so the resize zones never swallow a button click.
   if (a->r_close.hit(ev->x, ev->y)) {
@@ -332,10 +347,10 @@ void on_button(App *a, XButtonEvent *ev) {
     wm_moveresize(a, ev->x_root, ev->y_root, dir);
     return;
   }
-  // Click the terminal to type into the app; click the input bar for the box.
+  // Press in the output pane begins a text selection. A release without drag is
+  // treated as a plain click (focus the terminal) in on_release().
   if (a->r_out.hit(ev->x, ev->y)) {
-    a->passthrough = true;
-    a->dirty = true;
+    sel_begin(a, ev->x, ev->y);
     return;
   }
   if (ev->y >= a->H - a->input_h) {
@@ -347,4 +362,16 @@ void on_button(App *a, XButtonEvent *ev) {
     wm_moveresize(a, ev->x_root, ev->y_root, 8);
     return;
   }
+}
+void on_release(App *a, XButtonEvent *ev) {
+  if (ev->button != 1 || !a->selecting) return;
+  // A drag selects + copies (sel_end owns PRIMARY); a bare click focuses the
+  // terminal so keystrokes pass through to the running program.
+  if (!sel_end(a, ev->x, ev->y)) {
+    a->passthrough = true;
+    a->dirty = true;
+  }
+}
+void on_motion(App *a, XMotionEvent *ev) {
+  if (a->selecting) sel_update(a, ev->x, ev->y);
 }

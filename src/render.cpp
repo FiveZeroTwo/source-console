@@ -2,6 +2,7 @@
 
 #include "input.h"
 #include "png.h"
+#include "selection.h"
 #include "util.h"
 
 #include <algorithm>
@@ -51,6 +52,38 @@ static void text(App *a, int x, int y, const std::string &s, XftColor *c,
                     (const FcChar8 *)s.c_str(), s.size());
 }
 
+// ---- Source-style line classification ----
+// Build the ASCII-ish text of a visual row (scrollback or live) for keyword
+// matching; non-ASCII is folded to '?' since we only scan for English markers.
+static std::string row_text(App *a, int vidx, int N) {
+  std::string s;
+  auto push = [&](uint32_t cp) { s += (cp >= 32 && cp < 127) ? (char)cp : ' '; };
+  if (vidx < N) {
+    for (const Cell &cell : a->sb[vidx]) push(cell.cp);
+  } else {
+    for (int c = 0; c < a->cols; c++) {
+      VTermPos pos = {vidx - N, c};
+      VTermScreenCell cell;
+      if (!vterm_screen_get_cell(a->vts, pos, &cell)) continue;
+      push(cell.chars[0]);
+    }
+  }
+  return s;
+}
+// 2 = error-ish, 1 = warning-ish, 0 = neither. Errors win over warnings.
+static int classify_line(const std::string &s) {
+  std::string l = lower(s);
+  static const char *errs[] = {"error",  "fatal",     "panic",  "exception",
+                               "traceback", "segfault", "failed", "failure",
+                               "[err"};
+  for (const char *e : errs)
+    if (l.find(e) != std::string::npos) return 2;
+  static const char *warns[] = {"warning", "warn:", "[warn", "deprecat"};
+  for (const char *w : warns)
+    if (l.find(w) != std::string::npos) return 1;
+  return 0;
+}
+
 // ===================== rendering =========================================
 void render(App *a) {
   XftColor *face = colh(a, a->th.face), *bg = colh(a, a->th.bg);
@@ -98,9 +131,16 @@ void render(App *a) {
   int N = a->sb.size();
   int defr, defg, defb;
   parse_hex(a->th.bg, defr, defg, defb);
+  int dfr, dfg, dfb;  // default foreground — only these cells get line-tinted
+  parse_hex(a->th.fg, dfr, dfg, dfb);
   for (int row = 0; row < a->rows; row++) {
     int vidx = N - a->scroll + row;
     int py = o.y + 1 + row * a->ch;
+    // Tint the whole line if it reads like a warning/error (Source-style), but
+    // only its default-colored cells, so a program's own SGR colors win.
+    int cls = a->th.color_lines ? classify_line(row_text(a, vidx, N)) : 0;
+    XftColor *tint =
+        cls == 2 ? colh(a, a->th.error) : cls == 1 ? colh(a, a->th.warn) : nullptr;
     for (int c = 0; c < a->cols; c++) {
       int px = o.x + 3 + c * a->cw;
       uint32_t cp = 0;
@@ -127,7 +167,9 @@ void render(App *a) {
         br = b.rgb.red; bgc = b.rgb.green; bb = b.rgb.blue;
         bold = cell.attrs.bold;
       }
-      if (br != defr || bgc != defg || bb != defb)
+      if (cell_in_selection(a, vidx, c))
+        fillr(a, px, py, a->cw, a->ch, colh(a, a->th.highlight));
+      else if (br != defr || bgc != defg || bb != defb)
         fillr(a, px, py, a->cw, a->ch, col(a, br, bgc, bb));
       if (cp && cp != ' ') {
         char u8[8];
@@ -147,7 +189,10 @@ void render(App *a) {
           u8[n++] = 0x80 | ((cp >> 6) & 0x3f);
           u8[n++] = 0x80 | (cp & 0x3f);
         }
-        XftDrawStringUtf8(a->xd, col(a, fr, fgc, fb), bold ? a->fontb : a->font,
+        XftColor *fgcol = (tint && fr == dfr && fgc == dfg && fb == dfb)
+                              ? tint
+                              : col(a, fr, fgc, fb);
+        XftDrawStringUtf8(a->xd, fgcol, bold ? a->fontb : a->font,
                           px, py + a->asc, (const FcChar8 *)u8, n);
       }
     }

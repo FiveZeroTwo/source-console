@@ -15,3 +15,6 @@ void try_load_alias_dump(App *a);
 // Popup state for the current input.
 void update_completion(App *a);  // recompute matches for a->input
 void accept_completion(App *a);  // insert the selected match into a->input
+// Tab: extend the token to the matches' longest common prefix if that's
+// unambiguous progress, otherwise accept the highlighted match.
+void tab_complete(App *a);
