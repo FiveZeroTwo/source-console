@@ -41,6 +41,11 @@ A real, modern terminal (on par with Alacritty) wearing Source/VGUI chrome.
   it (`xdg-open`).
 - **Reflow on resize**: scrollback rewraps to the new width as you resize the
   window (libvterm reclaims lines via `sb_popline`).
+- **OSC 52**: programs (tmux, vim/neovim yank, etc.) can set the system
+  clipboard — works even over SSH. Clipboard *reads* are refused for safety.
+- **Live theming**: the palette is taken from your active **rice** theme
+  (`~/.config/alacritty/themes/active.toml`) and hot-reloads when you switch
+  rices or edit `colors.conf` — no restart (set `rice = false` to opt out).
 - **Color-coded output**, Source-style: lines that look like warnings are tinted
   yellow and errors red — but only their default-colored text, so a program's
   own colors are never overridden (toggle with `color_lines`).

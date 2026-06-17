@@ -122,6 +122,35 @@ void feed(App *a, const char *s, size_t n) {
 }
 void feed(App *a, const std::string &s) { feed(a, s.c_str(), s.size()); }
 
+// Push the current theme's colors into the vterm engine and drop the cached
+// XftColors so the next render re-allocates them. Used at startup and on
+// hot-reload.
+void apply_theme_colors(App *a) {
+  int r, g, b;
+  VTermColor fg, bg;
+  parse_hex(a->th.fg, r, g, b);
+  vterm_color_rgb(&fg, r, g, b);
+  parse_hex(a->th.bg, r, g, b);
+  vterm_color_rgb(&bg, r, g, b);
+  vterm_state_set_default_colors(a->vst, &fg, &bg);
+  for (int i = 0; i < 16; i++) {
+    VTermColor c;
+    parse_hex(a->th.palette[i], r, g, b);
+    vterm_color_rgb(&c, r, g, b);
+    vterm_state_set_palette_color(a->vst, i, &c);
+  }
+  for (auto &kv : a->ccache) XftColorFree(a->dpy, a->vis, a->cmap, &kv.second);
+  a->ccache.clear();
+}
+// Re-read the theme files and re-apply their colors live (hot-reload). Font
+// changes need a restart; colors/palette update in place.
+void reload_theme(App *a) {
+  load_theme(a->th);
+  apply_theme_colors(a);
+  a->theme_mtime = theme_files_mtime();
+  a->dirty = true;
+}
+
 // ===================== layout / sizing ===================================
 void compute_grid(App *a) {
   a->r_out = {a->pad, a->title_h + a->pad, a->W - 2 * a->pad - a->sbw,

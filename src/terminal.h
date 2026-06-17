@@ -11,6 +11,11 @@ void out_cb(const char *s, size_t len, void *u);
 void feed(App *a, const char *s, size_t n);
 void feed(App *a, const std::string &s);
 
+// Apply the current theme's colors to the engine + drop the color cache.
+void apply_theme_colors(App *a);
+// Re-read the theme files and re-apply colors live (hot-reload).
+void reload_theme(App *a);
+
 // Layout / sizing.
 void compute_grid(App *a);   // recompute rows/cols + the output rect for W/H
 void apply_size(App *a);     // push the current rows/cols to the pty + vterm

@@ -114,21 +114,10 @@ int main() {
   a.vts = vterm_obtain_screen(a.vt);
   vterm_screen_set_callbacks(a.vts, &SCB, &a);
   vterm_screen_reset(a.vts, 1);
-  VTermState *st = vterm_obtain_state(a.vt);
-  a.vst = st;
-  int r, g, b;
-  VTermColor fg, bgc;
-  parse_hex(a.th.fg, r, g, b);
-  vterm_color_rgb(&fg, r, g, b);
-  parse_hex(a.th.bg, r, g, b);
-  vterm_color_rgb(&bgc, r, g, b);
-  vterm_state_set_default_colors(st, &fg, &bgc);
-  for (int i = 0; i < 16; i++) {
-    VTermColor c;
-    parse_hex(a.th.palette[i], r, g, b);
-    vterm_color_rgb(&c, r, g, b);
-    vterm_state_set_palette_color(st, i, &c);
-  }
+  a.vst = vterm_obtain_state(a.vt);
+  apply_theme_colors(&a);  // default + 16-color palette → engine
+  a.theme_mtime = theme_files_mtime();
+  selection_register_osc(&a);  // OSC 52: programs can set the clipboard
   vterm_output_set_callback(a.vt, out_cb, &a);  // terminal -> child responses
 
   spawn(&a);
@@ -144,6 +133,7 @@ int main() {
   clock_gettime(CLOCK_MONOTONIC, &t0);
   bool seeded = false, seeded2 = false;
   bool was_app = false;
+  int tick = 0;  // loop counter, used to throttle the theme-file poll
 
   int xfd = ConnectionNumber(a.dpy);
   while (a.running) {
@@ -167,6 +157,8 @@ int main() {
       a.alias_want = false;
     }
     if (a.alias_pending) try_load_alias_dump(&a);
+    // Hot-reload the theme when colors.conf or the active rice theme changes.
+    if (++tick % 10 == 0 && theme_files_mtime() != a.theme_mtime) reload_theme(&a);
     selection_autoscroll_tick(&a);  // continuous edge-scroll during a drag
     if (a.dirty) {
       render(&a);

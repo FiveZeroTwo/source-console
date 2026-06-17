@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 void selection_init(App *a) {
@@ -292,6 +293,38 @@ void on_selection_notify(App *a, XSelectionEvent *e) {
   }
   a->dirty = true;
 }
+// ---- OSC 52: a program sets the system clipboard ----
+// libvterm parses OSC 52 and base64-decodes it for us, delivering the decoded
+// text (possibly in fragments) to this `set` callback. We then own the matching
+// X selection and serve the text like any other selection.
+static int sel_set_cb(VTermSelectionMask mask, VTermStringFragment frag,
+                      void *user) {
+  App *a = (App *)user;
+  if (frag.initial) a->osc_buf.clear();
+  a->osc_buf.append(frag.str, frag.len);
+  if (!frag.final) return 1;
+  std::string text = a->osc_buf;
+  a->osc_buf.clear();
+  if (text.empty()) return 1;
+  if (mask & VTERM_SELECTION_PRIMARY) {
+    a->seltext = text;
+    XSetSelectionOwner(a->dpy, a->a_primary, a->win, CurrentTime);
+  }
+  // CLIPBOARD (or anything that isn't strictly PRIMARY) → the clipboard.
+  if (mask != VTERM_SELECTION_PRIMARY) {
+    a->clip = text;
+    XSetSelectionOwner(a->dpy, a->a_clipboard, a->win, CurrentTime);
+  }
+  return 1;
+}
+// Refuse clipboard reads (don't let programs exfiltrate the clipboard).
+static int sel_query_cb(VTermSelectionMask, void *) { return 0; }
+static const VTermSelectionCallbacks SEL_CB = {sel_set_cb, sel_query_cb};
+void selection_register_osc(App *a) {
+  static char buf[16384];  // scratch libvterm uses to assemble the payload
+  vterm_state_set_selection_callbacks(a->vst, &SEL_CB, a, buf, sizeof buf);
+}
+
 void on_selection_clear(App *a, XSelectionClearEvent *e) {
   if (e->selection == a->a_clipboard) {
     a->clip.clear();

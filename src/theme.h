@@ -1,6 +1,7 @@
 // Theme = every configurable color, font and behavior toggle. Loaded from
 // colors.conf at startup (see load_theme); fields keep their defaults otherwise.
 #pragma once
+#include <ctime>
 #include <string>
 
 struct Theme {
@@ -21,6 +22,7 @@ struct Theme {
   // behavior toggles
   bool show_cwd = true;      // show the shell's cwd in the titlebar + prompt echo
   bool echo_command = true;  // echo each submitted command into the output log
+  bool rice = true;          // overlay the active rice theme's terminal palette
   // Source-style line coloring: tint default-fg output by content (off = never).
   bool color_lines = true;
   std::string warn = "#e6c46a";   // lines that look like warnings → yellow
@@ -29,4 +31,9 @@ struct Theme {
 
 // Load colors/font from $XDG_CONFIG_HOME/srcterm/colors.conf (or ~/.config/…),
 // else the shipped colors.conf, else the built-in defaults. Format: key = value.
+// If `rice` is set, the active rice theme's palette is overlaid afterwards.
 void load_theme(Theme &t);
+
+// Newest mtime across the theme source files (colors.conf + the rice theme),
+// for hot-reload: re-load when this changes. 0 if none are readable.
+time_t theme_files_mtime();

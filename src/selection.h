@@ -6,6 +6,7 @@
 #include "app.h"
 
 void selection_init(App *a);  // intern the selection atoms (needs an open display)
+void selection_register_osc(App *a);  // hook OSC 52 (program-set clipboard)
 
 // Mouse drag lifecycle (pixel coords within the window).
 void sel_begin(App *a, int x, int y);

@@ -108,7 +108,8 @@ struct App {
   int sel_l0 = 0, sel_c0 = 0;  // drag anchor
   int sel_l1 = 0, sel_c1 = 0;  // drag head (current)
   std::string seltext;     // PRIMARY selection text we serve
-  std::string clip;        // CLIPBOARD text we serve (Ctrl+Shift+C)
+  std::string clip;        // CLIPBOARD text we serve (Ctrl+Shift+C / OSC 52)
+  std::string osc_buf;     // accumulates a (possibly fragmented) OSC 52 payload
   bool paste_to_pty = false;   // pending paste: deliver to the app vs the box
   Atom a_primary = 0, a_clipboard = 0, a_utf8 = 0, a_targets = 0, a_seldata = 0;
   // multi-click + drag tracking
@@ -116,4 +117,5 @@ struct App {
   int click_count = 0;     // 1=single 2=double(word) 3=triple(line)
   int click_x = 0, click_y = 0;  // where the previous click landed
   int drag_x = 0, drag_y = 0;    // last drag position (for edge auto-scroll)
+  time_t theme_mtime = 0;        // newest mtime of the theme files (hot-reload)
 };
