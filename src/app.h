@@ -17,9 +17,16 @@
 
 #include "theme.h"
 
+// Cell attribute bit flags (stored in Cell::attrs and read back in render).
+enum CellAttr {
+  ATTR_BOLD = 1, ATTR_UNDERLINE = 2, ATTR_ITALIC = 4,
+  ATTR_STRIKE = 8, ATTR_DIM = 16, ATTR_REVERSE = 32,
+};
 struct Cell {  // a stored scrollback cell
   uint32_t cp;
-  uint8_t fr, fg, fb, br, bg, bb, bold;
+  uint8_t fr, fg, fb, br, bg, bb;
+  uint8_t attrs;  // CellAttr flags
+  uint8_t width;  // 1 = normal, 2 = double-width (CJK/emoji), 0 = trailing half
 };
 struct Rect {
   int x, y, w, h;
@@ -44,7 +51,8 @@ struct App {
   Pixmap buf = 0;
   GC gc = 0;
   XftDraw *xd = nullptr;
-  XftFont *font = nullptr, *fontb = nullptr;  // terminal grid (zoomable)
+  XftFont *font = nullptr, *fontb = nullptr;      // terminal grid (zoomable)
+  XftFont *fonti = nullptr, *fontbi = nullptr;    // italic + bold-italic
   XftFont *uifont = nullptr, *uifontb = nullptr;  // chrome (fixed size)
   std::string fontfam = "monospace";
   int fontsize = 11;              // current point size (for zoom)

@@ -30,9 +30,13 @@ static int cb_pushline(int cols, const VTermScreenCell *cells, void *u) {
     VTermColor f = cells[c].fg, b = cells[c].bg;
     vterm_screen_convert_color_to_rgb(a->vts, &f);
     vterm_screen_convert_color_to_rgb(a->vts, &b);
-    ln[c] = {cells[c].chars[0], f.rgb.red,        f.rgb.green,
-             f.rgb.blue,        b.rgb.red,        b.rgb.green,
-             b.rgb.blue,        (uint8_t)cells[c].attrs.bold};
+    const VTermScreenCellAttrs &at = cells[c].attrs;
+    uint8_t attrs = (at.bold ? ATTR_BOLD : 0) | (at.underline ? ATTR_UNDERLINE : 0) |
+                    (at.italic ? ATTR_ITALIC : 0) | (at.strike ? ATTR_STRIKE : 0) |
+                    (at.reverse ? ATTR_REVERSE : 0);
+    ln[c] = {cells[c].chars[0], f.rgb.red,  f.rgb.green, f.rgb.blue,
+             b.rgb.red,         b.rgb.green, b.rgb.blue,  attrs,
+             (uint8_t)cells[c].width};
   }
   a->sb.push_back(std::move(ln));
   if (a->sb.size() > 5000) a->sb.pop_front();
@@ -54,7 +58,12 @@ static int cb_popline(int cols, VTermScreenCell *cells, void *u) {
     if (cell) {
       vterm_color_rgb(&sc.fg, cell->fr, cell->fg, cell->fb);
       vterm_color_rgb(&sc.bg, cell->br, cell->bg, cell->bb);
-      sc.attrs.bold = cell->bold;
+      sc.attrs.bold = (cell->attrs & ATTR_BOLD) != 0;
+      sc.attrs.underline = (cell->attrs & ATTR_UNDERLINE) ? 1 : 0;
+      sc.attrs.italic = (cell->attrs & ATTR_ITALIC) != 0;
+      sc.attrs.strike = (cell->attrs & ATTR_STRIKE) != 0;
+      sc.attrs.reverse = (cell->attrs & ATTR_REVERSE) != 0;
+      if (cell->width) sc.width = cell->width;
     }
     cells[c] = sc;
   }
@@ -132,15 +141,21 @@ void apply_size(App *a) {
 
 // (re)load the regular + bold fonts at the current size; update cell metrics.
 void load_fonts(App *a) {
-  if (a->fontb && a->fontb != a->font) XftFontClose(a->dpy, a->fontb);
+  for (XftFont **f : {&a->fontb, &a->fonti, &a->fontbi})
+    if (*f && *f != a->font) XftFontClose(a->dpy, *f);
   if (a->font) XftFontClose(a->dpy, a->font);
-  a->font = a->fontb = nullptr;
+  a->font = a->fontb = a->fonti = a->fontbi = nullptr;
   std::string pat =
       a->fontfam + ":size=" + std::to_string(a->fontsize) + ":dpi=96";
   a->font = XftFontOpenName(a->dpy, a->scr, pat.c_str());
   if (!a->font) return;
   a->fontb = XftFontOpenName(a->dpy, a->scr, (pat + ":weight=bold").c_str());
-  if (!a->fontb) a->fontb = a->font;
+  a->fonti = XftFontOpenName(a->dpy, a->scr, (pat + ":slant=italic").c_str());
+  a->fontbi = XftFontOpenName(a->dpy, a->scr,
+                              (pat + ":weight=bold:slant=italic").c_str());
+  if (!a->fontb) a->fontb = a->font;   // fall back to regular if a variant is
+  if (!a->fonti) a->fonti = a->font;   // missing for this family
+  if (!a->fontbi) a->fontbi = a->fontb;
   a->cw = a->font->max_advance_width;
   a->ch = a->font->ascent + a->font->descent;
   a->asc = a->font->ascent;

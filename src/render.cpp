@@ -145,14 +145,16 @@ void render(App *a) {
       int px = o.x + 3 + c * a->cw;
       uint32_t cp = 0;
       int fr = 0, fgc = 0, fb = 0, br = defr, bgc = defg, bb = defb;
-      bool bold = false;
+      uint8_t attrs = 0, width = 1;
       if (vidx < N) {  // scrollback
         if (c >= (int)a->sb[vidx].size()) continue;
         const Cell &cell = a->sb[vidx][c];
+        if (cell.width == 0) continue;  // trailing half of a wide char
         cp = cell.cp;
         fr = cell.fr; fgc = cell.fg; fb = cell.fb;
         br = cell.br; bgc = cell.bg; bb = cell.bb;
-        bold = cell.bold;
+        attrs = cell.attrs;
+        width = cell.width ? cell.width : 1;
       } else {  // live screen
         VTermPos pos = {vidx - N, c};
         VTermScreenCell cell;
@@ -161,40 +163,45 @@ void render(App *a) {
         VTermColor f = cell.fg, b = cell.bg;
         vterm_screen_convert_color_to_rgb(a->vts, &f);
         vterm_screen_convert_color_to_rgb(a->vts, &b);
-        if (cell.attrs.reverse) std::swap(f, b);
         cp = cell.chars[0];
         fr = f.rgb.red; fgc = f.rgb.green; fb = f.rgb.blue;
         br = b.rgb.red; bgc = b.rgb.green; bb = b.rgb.blue;
-        bold = cell.attrs.bold;
+        const VTermScreenCellAttrs &at = cell.attrs;
+        attrs = (at.bold ? ATTR_BOLD : 0) | (at.underline ? ATTR_UNDERLINE : 0) |
+                (at.italic ? ATTR_ITALIC : 0) | (at.strike ? ATTR_STRIKE : 0) |
+                (at.reverse ? ATTR_REVERSE : 0);
+        width = cell.width >= 2 ? 2 : 1;
       }
+      if (attrs & ATTR_REVERSE) {  // swap fg/bg (uniform for live + scrollback)
+        std::swap(fr, br); std::swap(fgc, bgc); std::swap(fb, bb);
+      }
+      int cellw = width == 2 ? 2 * a->cw : a->cw;  // wide cells span two columns
+      bool bold = attrs & ATTR_BOLD, italic = attrs & ATTR_ITALIC;
       if (cell_in_selection(a, vidx, c))
-        fillr(a, px, py, a->cw, a->ch, colh(a, a->th.highlight));
+        fillr(a, px, py, cellw, a->ch, colh(a, a->th.highlight));
       else if (br != defr || bgc != defg || bb != defb)
-        fillr(a, px, py, a->cw, a->ch, col(a, br, bgc, bb));
+        fillr(a, px, py, cellw, a->ch, col(a, br, bgc, bb));
+      // foreground color, with dim blended toward the background
+      XftColor *fgcol;
+      if (tint && fr == dfr && fgc == dfg && fb == dfb) {
+        fgcol = tint;
+      } else if (attrs & ATTR_DIM) {
+        fgcol = col(a, (fr + br) / 2, (fgc + bgc) / 2, (fb + bb) / 2);
+      } else {
+        fgcol = col(a, fr, fgc, fb);
+      }
       if (cp && cp != ' ') {
         char u8[8];
-        int n = 0;
-        if (cp < 0x80)
-          u8[n++] = cp;
-        else if (cp < 0x800) {
-          u8[n++] = 0xc0 | (cp >> 6);
-          u8[n++] = 0x80 | (cp & 0x3f);
-        } else if (cp < 0x10000) {
-          u8[n++] = 0xe0 | (cp >> 12);
-          u8[n++] = 0x80 | ((cp >> 6) & 0x3f);
-          u8[n++] = 0x80 | (cp & 0x3f);
-        } else {
-          u8[n++] = 0xf0 | (cp >> 18);
-          u8[n++] = 0x80 | ((cp >> 12) & 0x3f);
-          u8[n++] = 0x80 | ((cp >> 6) & 0x3f);
-          u8[n++] = 0x80 | (cp & 0x3f);
-        }
-        XftColor *fgcol = (tint && fr == dfr && fgc == dfg && fb == dfb)
-                              ? tint
-                              : col(a, fr, fgc, fb);
-        XftDrawStringUtf8(a->xd, fgcol, bold ? a->fontb : a->font,
-                          px, py + a->asc, (const FcChar8 *)u8, n);
+        int n = enc_utf8(cp, u8);
+        XftFont *gf = bold ? (italic ? a->fontbi : a->fontb)
+                           : (italic ? a->fonti : a->font);
+        XftDrawStringUtf8(a->xd, fgcol, gf, px, py + a->asc,
+                          (const FcChar8 *)u8, n);
       }
+      if (attrs & ATTR_UNDERLINE)
+        fillr(a, px, py + a->asc + 1, cellw, 1, fgcol);
+      if (attrs & ATTR_STRIKE)
+        fillr(a, px, py + a->asc - a->asc / 3, cellw, 1, fgcol);
     }
   }
 
